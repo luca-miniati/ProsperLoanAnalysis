@@ -1,0 +1,115 @@
+---
+title: "Prosper Loan Analysis"
+author: "Luca Miniati"
+output: html_document
+---
+
+## Background
+Prosper is a peer-to-peer lending platform where borrowers can find investors to fund their loans.
+Prosper's business relies on the idea of fractionalization, where funds for loans are
+essentially "crowd sourced" from investors, who can invest as little as $25 per loan.
+
+I will be analyzing the performance of Prosper loans from 2023-2024. The dataset is availble at
+<https://help.prosper.com/hc/en-us/articles/210013083-Where-can-I-download-data-about-loans-through-Prosper>
+with a free account.
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Tidying
+```{r}
+df <- read.csv("data/data.csv")
+
+# Check dimensions of data
+dim(df)
+# Check for duplicate rows
+nrow(df[duplicated(df), ])
+```
+
+At a first glance, Prosper processed 135809 unique loans in 2023, tracking 22 columns of data with
+no duplicate rows.
+
+```{r}
+# Check for null values
+colSums(is.na(df))
+```
+
+In the dataset, it looks like there aren't any null values except in the `loan_default_reason`
+column, which has an unusally high number of null values (135621 values out of the 135809 total
+rows). This is because only a fraction of the loans are actually defaulted; the rest are current
+(in progress) or completed (without default). These other loans don't have a default reason in the
+table because they aren't defaulted.
+
+```{r}
+# Selecting the loans that have a non-null default reason
+loans_with_default_reason <- df[!is.na(df$loan_default_reason), ]
+head(loans_with_default_reason)
+```
+
+In the results of the loans with a default reason, there are some rows with
+`loan_default_reason_description=DECEASED`. If someone passed away with an active loan, their loan
+was marked as defaulted. From a financial standpoint, this makes sense, because a death would be
+considered a financial loss by Prosper.  
+Because of this, we won't impute or drop these null value; rather, we'll treat the missing values
+as meaningful in indicating non-defaulted loans.
+
+```{r}
+# Check data types of each column
+sapply(df, class)
+```
+
+The data types look mostly correct, with the exception of `origination_date` and `prosper_rating`.  
+
+```{r}
+df$origination_date <- as.POSIXct(df$origination_date)
+df$prosper_rating <- as.factor(df$prosper_rating)
+```
+
+For easier manipulation of dates, `origination_date` was converted into a POSIXct object.
+Additionally, `prosper_rating` was converted to a factor to simplify the categorical analysis later.
+
+```{r}
+# Summary statistics for numeric variables
+summary(df[, sapply(df, is.numeric)])
+```
+
+For the numeric variables, everything looks reasonable except for `loan_number` and
+`loan_default_reason`. `loan_number` is a unique id given to each loan by Prosper. For the purposes
+of this analysis, we'll drop the column, as it doesn't contribute anything. `loan_default_reason` is
+a column of categorical features corresponding to the reason for a loan defaulting. For example,
+a `loan_default_reason` of `1` corresponds to a borrower committing an unacceptable number of
+delinquencies (late or missing payments). This directly corresponds to the human-readable label
+column of `loan_default_reason_description`, so we'll drop `loan_default_reason` in favor of
+`loan_default_reason_description`.
+
+```{r}
+df <- subset(df, select = -c(loan_number, loan_default_reason_description))
+```
+
+Outliers are often problematic in data analysis, but they play a unique role in our dataset of
+loans. Unusual values, like 355.0 for `days_past_due`, 315.0 for `prosper_fees_paid`, and 395.94
+for `late_fees_paid` represent distinct (negative) loan outcomes that we'll want to analyze later.
+For now, we'll leave these outliers in the dataset. Without these troublemakers, the dataset would
+become homogenous, and we'd have nothing to analyze.
+
+With our data tidy, we can move on.
+
+## Exploratory Data Analysis
+```{r}
+# Histograms
+par(mfrow=c(1,3))
+hist(df$days_past_due, main="Days Past Due", xlab="Days")
+hist(df$prosper_fees_paid, main="Prosper Fees Paid", xlab="Fees")
+hist(df$late_fees_paid, main="Late Fees Paid", xlab="Fees")
+```
+
+Most people pay back their loans on time, with some extreme outliers.
+
+```{r include=FALSE}
+library(tidyverse)
+```
+
+```{r}
+head(df)
+```
