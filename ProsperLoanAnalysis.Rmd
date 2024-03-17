@@ -137,7 +137,7 @@ metric is used to grade borrowers on trustworthiness. This `prosper_rating` is a
 determining which loans are funded by investors, as it is blatantly displayed on the listings for
 each loan on the Prosper website.
 
-`late_fees_paid`.
+![Prosper Investor Website](images/prosper_listings.png)
 
 ```{r}
 # Map `prosper_rating` to numberic values
@@ -252,7 +252,7 @@ For this sample, the default rates by rating are:
 - C: 23.4%-24.7%
 - D: 31.1%-32.3%
 - HR: 33.9%-35.8%
-- D: 34%-35.9%
+- E: 34%-35.9%
 
 The defalt rates for `HR` and `D` loans are shockingly similar. Let's compare the average default
 rates for the ratings to see which types are the best investments.
@@ -263,12 +263,25 @@ rating_groups <- split(df$borrower_rate, df$prosper_rating)
 
 # Compute mean
 average_rates <- tapply(df$borrower_rate, df$prosper_rating, mean)
-(average_rates <- average_rates[, order(average_rates)]
+# Sort by rate, descendin
+(average_rates <- average_rates[order(average_rates, decreasing = TRUE)])
 ```
 
-TODO:
+`HR` loans actually get higher interest rates, even though they default less often than `E` loans.
+From this standpoint, `HR` loans coulrd represent a unique opportunity for investing. For
+investors, this suggests a possible strategy of "barbell investing". This investment strategy
+offers a balance between safety and potential for higher returns.
 
-- Borrower rate vs term vs Amount borrowed
-  - Hypothesis: if we have higher amount borrowed, we get longer term and lower rate
-- Loan status vs borrower rate
-  - Prosper should give better rates to completed loans
+By investing mainly in low-risk loans (`AA-B`) and allocating a portion of the portfolio to
+high-risk (`HR`) loans, investors can create a barbell-shaped portfolio. This strategy aims to
+capture the benefits of both low-risk and high-risk investments, allowing investors to potentially
+earn higher returns while still mitigating risk through diversification.
+
+## Conclusion
+Through EDA, many insights were found about the Prosper peer-to-peer lending platform. Most notable
+was the analysis of the true default rate across ratings. After accounting for charge-offs, the
+strategy of "barbell investing" appears to be an attractive option to maximize returns.
+
+In the future, I'd like to explore the performance of different investment strategies through a
+backtest (likely written in Python). Additionally, it would be interesting to see more columns of
+data, to see if I could "reverse-engineer" Prosper's rating system.
