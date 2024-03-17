@@ -13,17 +13,37 @@ I will be analyzing the performance of Prosper loans from 2023-2024. The dataset
 <https://help.prosper.com/hc/en-us/articles/210013083-Where-can-I-download-data-about-loans-through-Prosper>
 with a free account.
 
+For the subsequent analysis, it's important to define some terms.  
+
+- Peer-to-peer lending: A system that connects borrowers directly to investors, cutting out banks
+  from the process. 
+- Default: If a borrower fails to pay back a loan, the loan is considered "defaulted". The
+  borrower's credit score is impacted, and the investors are not compensated for their loss.  
+- Completion: If a borrower pays the loan back in full, the loan is considered "completed".  
+- Charge-off: If a borrower fails to pay multiple payments on a loan, the financial
+  institution that created the loan is likely to write the loan off as a loss, essentially
+  expecting it to default. Borrower still technicaly owes the money, but the debt might be sold to
+  a new buyer or transferred to a collection agency.  
+- Charge-off recovery: In the event of a charge-off, the borrower still has a chance to repay the
+  loan. If they do, the loan is considered "recovered".
+- Status: The current status of a loan (e.g "Defaulted", "Completed", etc.).  
+- Amount: The amount of money the borrower takes from the investors.  
+- Term: How long the borrower has to repay the amount.  
+- Annual Interest Rate (APR): The interest rate that is charged to the borrower each year. All
+  Prosper loans are [amortized](https://www.investopedia.com/terms/a/amortized_loan.asp).  
+
 ```{r include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=10)
+options(width = 100)
+library(tidyverse)
+library(lubridate)
 ```
 
 ## Tidying
 ```{r}
 df <- read.csv("data/data.csv")
 
-# Check dimensions of data
-dim(df)
-# Check for duplicate rows
 nrow(df[duplicated(df), ])
 ```
 
@@ -50,7 +70,7 @@ head(loans_with_default_reason)
 In the results of the loans with a default reason, there are some rows with
 `loan_default_reason_description=DECEASED`. If someone passed away with an active loan, their loan
 was marked as defaulted. From a financial standpoint, this makes sense, because a death would be
-considered a financial loss by Prosper.  
+considered a financial loss by the investor who gave them money
 Because of this, we won't impute or drop these null value; rather, we'll treat the missing values
 as meaningful in indicating non-defaulted loans.
 
@@ -87,15 +107,21 @@ column of `loan_default_reason_description`, so we'll drop `loan_default_reason`
 df <- subset(df, select = -c(loan_number, loan_default_reason_description))
 ```
 
-Outliers are often problematic in data analysis, but they play a unique role in our dataset of
-loans. Unusual values, like 355.0 for `days_past_due`, 315.0 for `prosper_fees_paid`, and 395.94
-for `late_fees_paid` represent distinct (negative) loan outcomes that we'll want to analyze later.
-For now, we'll leave these outliers in the dataset. Without these troublemakers, the dataset would
-become homogenous, and we'd have nothing to analyze.
-
 With our data tidy, we can move on.
 
 ## Exploratory Data Analysis
+
+First, let's have an overview of the numeric features of the dataset.
+
+```{r}
+pairs(df[, sapply(df, is.numeric)])
+```
+
+From a birds-eye view, there seems to be slight relationships between some variables, but the data
+is mostly scattered.
+
+Next, I'd like to explore the aforementioned outliers.
+
 ```{r}
 # Histograms
 par(mfrow=c(1,3))
@@ -106,10 +132,143 @@ hist(df$late_fees_paid, main="Late Fees Paid", xlab="Fees")
 
 Most people pay back their loans on time, with some extreme outliers.
 
-```{r include=FALSE}
-library(tidyverse)
-```
+Prosper rates each individual borrower based on their credit, income, and past delinquencies. This
+metric is used to grade borrowers on trustworthiness. This `prosper_rating` is a crucial field for
+determining which loans are funded by investors, as it is blatantly displayed on the listings for
+each loan on the Prosper website.
+
+`late_fees_paid`.
 
 ```{r}
-head(df)
+# Map `prosper_rating` to numberic values
+ratings_numeric <- c("HR" = 1, "E" = 2, "D" = 3, "C" = 4, "B" = 5, "A" = 6, "AA" = 7)
+
+# Convert prosper_rating to numeric using the mapping
+df$prosper_rating_numeric <- ratings_numeric[as.character(df$prosper_rating)]
+
+# Scatter plots
+par(mfrow=c(1, 3))
+plot(df$prosper_rating_numeric, df$days_past_due, main="Days Past Due vs. Prosper Rating", xlab="Prosper Rating", ylab="Days Past Due")
+plot(df$prosper_rating_numeric, df$prosper_fees_paid, main="Prosper Fees Paid vs. Prosper Rating", xlab="Prosper Rating", ylab="Prosper Fees Paid")
+plot(df$prosper_rating_numeric, df$late_fees_paid, main="Late Fees Paid vs. Prosper Rating", xlab="Prosper Rating", ylab="Late Fees Paid")
+
+
+# Check the correlation
+cor(df$prosper_rating_numeric, df$days_past_due)
+cor(df$prosper_rating_numeric, df$prosper_fees_paid)
+cor(df$prosper_rating_numeric, df$late_fees_paid)
 ```
+
+It looks like their rating wasn't able to capture the volatile nature of peer-to-peer loan
+payments. Let's see if it was able to predict loan status.
+
+```{r}
+# Filter the dataframe to include only final loan statuses (non-current loans)
+df_filtered <- df[df$loan_status_description %in% c("DEFAULTED", "COMPLETED", "CHARGEOFF"), ]
+
+# Calculate proportions of loan status by `prosper_rating`
+loan_status_proportions <- prop.table(table(df_filtered$prosper_rating, df_filtered$loan_status_description),
+                                      margin = 1)
+# Convert to dataframe for plotting
+loan_status_df <- as.data.frame(loan_status_proportions)
+
+# Set data in correct order
+loan_status_df <- loan_status_df %>%
+    mutate(Var1 = factor(Var1, levels = c("AA", "A", "B", "C", "D", "E", "HR")),
+           Var2 = factor(Var2, levels = c("DEFAULTED", "CHARGEOFF", "COMPLETED")))
+
+# Plot stacked bar chart
+ggplot(loan_status_df, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("DEFAULTED" = "#F25F5C", "CHARGEOFF" = "#F0803C", "COMPLETED" = "#7DDE92")) +
+  labs(x = "Prosper Rating", y = "Proportion (%)", fill = "Loan Status") +
+  ggtitle("Loan Status Proportions by Prosper Rating") +
+  theme_minimal()
+```
+
+While `prosper_rating` doesn't predict late payments well, it does seem to be a good predictor for
+the final status of a loan. This makes sense because investors are likely to care less about when
+they get paid, and more about whether they get their money back at all in the long run.
+
+Peer-to-peer lending gets a bad rap because of its historical instability and high default rates.
+Let's investigate Prosper's default rates in this dataset further.
+
+```{r}
+# Sort by `DEFAULTED` in descending order
+loan_status_proportions <- loan_status_proportions[order(loan_status_proportions[, "DEFAULTED"]), ]
+round(loan_status_proportions, digits = 4)
+```
+
+As expected, higher `prosper_rating` generally corresponds to a lower default rate. However, with
+the criteria of default rate, `C` loans actually outperformed `B` loans and `E` loans outperformed
+`D` loans. Let's investigate this further, since this isn't what we expected.
+
+Taking a closer look, the discrepancy lies in the `CHARGEOFF` column. `C` loans have ~10% higher
+rates of charge-off than those of `B` loans, which causes the shockingly low default rate.
+Remember, loans that are charged off are likely to default. Prosper probably separates the rates of
+charge-off and default in order to artificially deflate the default rate. Compared to the market
+average default rate of greater than 10%
+[[1]](https://jfin-swufe.springeropen.com/articles/10.1186/s40854-020-00197-y), all of Prosper's
+default rates in 2023 were techically less than 1.7%, without factoring in charge-offs. The true
+default rate is much higher if we consider charge-offs.
+
+To consider charge-offs in the total default rate for each rating, we can use Prosper's reported
+recovery rate of 9.5% ± 2.5%
+[[2]](https://help.prosper.com/hc/en-us/articles/210013613-What-happens-if-a-borrower-misses-a-payment#:~:text=If%20a%20loan%20is%20more,range%20from%207%2D12%25.).
+
+```{r}
+# Adjust for charge-offs
+loan_status_proportions_adjusted <- data.frame(
+    COMPLETED_LO = loan_status_proportions[, "COMPLETED"] +
+        0.07 * loan_status_proportions[, "CHARGEOFF"],
+    COMPLETED_MID = loan_status_proportions[, "COMPLETED"] +
+        0.095 * loan_status_proportions[, "CHARGEOFF"],
+    COMPLETED_HI = loan_status_proportions[, "COMPLETED"] +
+        0.12 * loan_status_proportions[, "CHARGEOFF"],
+    DEFAULTED_LO = loan_status_proportions[, "DEFAULTED"] +
+        0.93 * loan_status_proportions[, "CHARGEOFF"],
+    DEFAULTED_MID = loan_status_proportions[, "DEFAULTED"] +
+        0.905 * loan_status_proportions[, "CHARGEOFF"],
+    DEFAULTED_HI = loan_status_proportions[, "DEFAULTED"] +
+        0.88 * loan_status_proportions[, "CHARGEOFF"]
+)
+# Sort by `DEFAULTED_HI` ascending
+loan_status_proportions_adjusted <- loan_status_proportions_adjusted[
+                            order(loan_status_proportions_adjusted$DEFAULTED_HI), ]
+round(loan_status_proportions_adjusted, digits = 4)
+```
+
+In the table above, `*_LO` represents the lower endpoint of recovery rate (7%), `*_MID` represents
+the mid recovery rate (9.5%), and `*_HI` represents the upper endpoint of recovery rate (12.5%).
+
+Adjusting for charge-offs, the data now show that `HR` loans outperform `E` loans, but all the
+other ratings are in order.
+
+For this sample, the default rates by rating are:
+
+- AA: 2.9%-3.1%
+- A: 7.7%-8.2%
+- B: 15%-15.8%
+- C: 23.4%-24.7%
+- D: 31.1%-32.3%
+- HR: 33.9%-35.8%
+- D: 34%-35.9%
+
+The defalt rates for `HR` and `D` loans are shockingly similar. Let's compare the average default
+rates for the ratings to see which types are the best investments.
+
+```{r}
+# Group by Prosper rating
+rating_groups <- split(df$borrower_rate, df$prosper_rating)
+
+# Compute mean
+average_rates <- tapply(df$borrower_rate, df$prosper_rating, mean)
+(average_rates <- average_rates[, order(average_rates)]
+```
+
+TODO:
+
+- Borrower rate vs term vs Amount borrowed
+  - Hypothesis: if we have higher amount borrowed, we get longer term and lower rate
+- Loan status vs borrower rate
+  - Prosper should give better rates to completed loans
